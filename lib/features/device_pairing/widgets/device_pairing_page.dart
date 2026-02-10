@@ -6,14 +6,17 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/providers/device_provider.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../services/network_discovery_service.dart';
+import '../../../services/bluetooth_discovery_service.dart';
 import '../../../models/ac_device.dart';
 
 class DevicePairingPage extends ConsumerStatefulWidget {
-  final DiscoveredDevice discoveredDevice;
+  final DiscoveredDevice? discoveredDevice;
+  final BluetoothDevice? bluetoothDevice;
 
   const DevicePairingPage({
     super.key,
-    required this.discoveredDevice,
+    this.discoveredDevice,
+    this.bluetoothDevice,
   });
 
   @override
@@ -25,19 +28,30 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
   final _brandController = TextEditingController();
   final _modelController = TextEditingController();
   final _notesController = TextEditingController();
-  
+
   String _selectedMode = ACMode.cool;
   String _selectedFanSpeed = FanSpeed.auto;
   int _targetTemperature = 24;
-  
+
   bool _isPairing = false;
   bool _isTestingConnection = false;
   bool _connectionTestResult = false;
 
+  String get _connectionType {
+    if (widget.discoveredDevice != null) return ConnectionType.wifi;
+    if (widget.bluetoothDevice != null) return ConnectionType.bluetooth;
+    return ConnectionType.wifi;
+  }
+
   @override
   void initState() {
     super.initState();
-    _nameController.text = '智能空调 ${widget.discoveredDevice.ipAddress.split('.').last}';
+    if (widget.discoveredDevice != null) {
+      _nameController.text =
+          '智能空调 ${widget.discoveredDevice!.ipAddress.split('.').last}';
+    } else if (widget.bluetoothDevice != null) {
+      _nameController.text = widget.bluetoothDevice!.name;
+    }
   }
 
   @override
@@ -87,10 +101,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       decoration: BoxDecoration(
         gradient: AppTheme.cardGradient,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.accent.withOpacity(0.3),
-          width: 1,
-        ),
+        border: Border.all(color: AppColors.accent.withOpacity(0.3), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -104,7 +115,9 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  Icons.router,
+                  _connectionType == ConnectionType.bluetooth
+                      ? Icons.bluetooth
+                      : Icons.router,
                   color: AppColors.accent,
                   size: 28,
                 ),
@@ -123,7 +136,9 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      widget.discoveredDevice.ipAddress,
+                      widget.discoveredDevice?.ipAddress ??
+                          widget.bluetoothDevice?.name ??
+                          '未知设备',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -136,13 +151,27 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
             ],
           ),
           const SizedBox(height: 20),
-          _buildInfoRow('端口', widget.discoveredDevice.port.toString()),
-          const SizedBox(height: 12),
-          _buildInfoRow('MAC地址', widget.discoveredDevice.macAddress ?? '未知'),
-          const SizedBox(height: 12),
-          _buildInfoRow('设备名称', widget.discoveredDevice.deviceName ?? '未知'),
-          const SizedBox(height: 12),
-          _buildInfoRow('制造商', widget.discoveredDevice.manufacturer ?? '未知'),
+          if (widget.discoveredDevice != null) ...[
+            _buildInfoRow('端口', widget.discoveredDevice!.port.toString()),
+            const SizedBox(height: 12),
+            _buildInfoRow('MAC地址', widget.discoveredDevice!.macAddress ?? '未知'),
+            const SizedBox(height: 12),
+            _buildInfoRow('设备名称', widget.discoveredDevice!.deviceName ?? '未知'),
+            const SizedBox(height: 12),
+            _buildInfoRow('制造商', widget.discoveredDevice!.manufacturer ?? '未知'),
+          ] else if (widget.bluetoothDevice != null) ...[
+            _buildInfoRow('设备ID', widget.bluetoothDevice!.deviceId),
+            const SizedBox(height: 12),
+            if (widget.bluetoothDevice!.localName != null)
+              _buildInfoRow('本地名称', widget.bluetoothDevice!.localName!),
+            const SizedBox(height: 12),
+            _buildInfoRow('信号强度', _getSignalText(widget.bluetoothDevice!.rssi)),
+            const SizedBox(height: 12),
+            _buildInfoRow(
+              '设备类型',
+              _getDeviceTypeName(widget.bluetoothDevice!.type),
+            ),
+          ],
           if (_connectionTestResult) ...[
             const SizedBox(height: 12),
             Container(
@@ -153,11 +182,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: AppColors.success,
-                    size: 16,
-                  ),
+                  Icon(Icons.check_circle, color: AppColors.success, size: 16),
                   const SizedBox(width: 8),
                   Text(
                     '连接测试成功',
@@ -184,10 +209,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
           width: 80,
           child: Text(
             label,
-            style: TextStyle(
-              fontSize: 14,
-              color: AppColors.textSecondary,
-            ),
+            style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
           ),
         ),
         Expanded(
@@ -204,27 +226,42 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
     );
   }
 
+  String _getSignalText(int? rssi) {
+    if (rssi == null) return '未知';
+    if (rssi >= -50) return '强';
+    if (rssi >= -70) return '中';
+    return '弱';
+  }
+
+  String _getDeviceTypeName(String type) {
+    switch (type) {
+      case 'air_conditioner':
+        return '空调';
+      case 'sensor':
+        return '传感器';
+      case 'thermostat':
+        return '温控器';
+      case 'smart_device':
+        return '智能设备';
+      default:
+        return '未知';
+    }
+  }
+
   Widget _buildDeviceConfigCard() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.divider,
-          width: 1,
-        ),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                Icons.settings,
-                color: AppColors.accent,
-                size: 24,
-              ),
+              Icon(Icons.settings, color: AppColors.accent, size: 24),
               const SizedBox(width: 12),
               Text(
                 '设备配置',
@@ -318,21 +355,14 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.divider,
-          width: 1,
-        ),
+        border: Border.all(color: AppColors.divider, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                Icons.tune,
-                color: AppColors.accent,
-                size: 24,
-              ),
+              Icon(Icons.tune, color: AppColors.accent, size: 24),
               const SizedBox(width: 12),
               Text(
                 '初始设置',
@@ -361,10 +391,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       children: [
         Text(
           '运行模式',
-          style: TextStyle(
-            fontSize: 14,
-            color: AppColors.textSecondary,
-          ),
+          style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -387,11 +414,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
     return FilterChip(
       label: Row(
         mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 4),
-          Text(label),
-        ],
+        children: [Icon(icon, size: 16), const SizedBox(width: 4), Text(label)],
       ),
       selected: isSelected,
       onSelected: (selected) {
@@ -404,13 +427,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       labelStyle: TextStyle(
         color: isSelected ? AppColors.accent : AppColors.textSecondary,
       ),
-      avatar: isSelected
-          ? Icon(
-              icon,
-              size: 16,
-              color: AppColors.accent,
-            )
-          : null,
+      avatar: isSelected ? Icon(icon, size: 16, color: AppColors.accent) : null,
     );
   }
 
@@ -420,10 +437,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       children: [
         Text(
           '风速',
-          style: TextStyle(
-            fontSize: 14,
-            color: AppColors.textSecondary,
-          ),
+          style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -464,10 +478,7 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       children: [
         Text(
           '目标温度',
-          style: TextStyle(
-            fontSize: 14,
-            color: AppColors.textSecondary,
-          ),
+          style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 12),
         Container(
@@ -487,7 +498,10 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
                 color: AppColors.accent,
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.accent.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
@@ -518,39 +532,41 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
   Widget _buildActionButtons() {
     return Column(
       children: [
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _isTestingConnection ? null : _testConnection,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.secondaryAccent.withOpacity(0.2),
-              foregroundColor: AppColors.secondaryAccent,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        if (_connectionType == ConnectionType.wifi) ...[
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _isTestingConnection ? null : _testConnection,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.secondaryAccent.withOpacity(0.2),
+                foregroundColor: AppColors.secondaryAccent,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
               ),
-              elevation: 0,
-            ),
-            child: _isTestingConnection
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              child: _isTestingConnection
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.wifi_tethering),
+                        SizedBox(width: 8),
+                        Text('测试连接'),
+                      ],
                     ),
-                  )
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.wifi_tethering),
-                      SizedBox(width: 8),
-                      Text('测试连接'),
-                    ],
-                  ),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 12),
+        ],
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
@@ -588,6 +604,8 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
   }
 
   Future<void> _testConnection() async {
+    if (widget.discoveredDevice == null) return;
+
     setState(() {
       _isTestingConnection = true;
       _connectionTestResult = false;
@@ -596,8 +614,8 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
     try {
       final service = NetworkDiscoveryService();
       final result = await service.testDeviceConnection(
-        widget.discoveredDevice.ipAddress,
-        port: widget.discoveredDevice.port,
+        widget.discoveredDevice!.ipAddress,
+        port: widget.discoveredDevice!.port,
       );
 
       setState(() {
@@ -658,9 +676,11 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
         name: _nameController.text,
         brand: _brandController.text.isEmpty ? '未知' : _brandController.text,
         model: _modelController.text.isEmpty ? '未知' : _modelController.text,
-        connectionType: ConnectionType.wifi,
-        ipAddress: widget.discoveredDevice.ipAddress,
-        macAddress: widget.discoveredDevice.macAddress,
+        connectionType: _connectionType,
+        ipAddress: widget.discoveredDevice?.ipAddress,
+        macAddress:
+            widget.discoveredDevice?.macAddress ??
+            widget.bluetoothDevice?.deviceId,
         isOnline: _connectionTestResult,
         isPoweredOn: false,
         temperature: _targetTemperature,
@@ -668,7 +688,6 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
         mode: _selectedMode,
         fanSpeed: _selectedFanSpeed,
         powerRating: 1.5,
-        notes: _notesController.text.isEmpty ? null : _notesController.text,
       );
 
       await ref.read(deviceNotifierProvider.notifier).addDevice(device);
@@ -676,34 +695,28 @@ class _DevicePairingPageState extends ConsumerState<DevicePairingPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('设备配对成功'),
+            content: const Text('设备添加成功'),
             backgroundColor: AppColors.success,
             behavior: SnackBarBehavior.floating,
           ),
         );
-        
-        await Future.delayed(const Duration(seconds: 1));
-        
-        if (mounted) {
-          Navigator.pop(context, true);
-        }
+        Navigator.pop(context);
+        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('设备配对失败: $e'),
+            content: Text('添加设备失败: $e'),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isPairing = false;
-        });
-      }
+      setState(() {
+        _isPairing = false;
+      });
     }
   }
 }

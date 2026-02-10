@@ -17,7 +17,9 @@ import 'quick_action_button.dart';
 import '../../remote/widgets/remote_controller.dart';
 import '../../device_discovery/widgets/device_discovery_page.dart';
 import '../../device_pairing/widgets/device_pairing_page.dart';
+import '../../bluetooth_discovery/widgets/bluetooth_discovery_page.dart';
 import '../../../services/network_discovery_service.dart';
+import '../../../services/bluetooth_discovery_service.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -716,6 +718,31 @@ class _AddDeviceDialogState extends ConsumerState<_AddDeviceDialog> {
                         color: AppColors.textSecondary,
                       ),
                     ),
+                  ] else if (_connectionType == ConnectionType.bluetooth) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _scanBluetoothDevices,
+                        icon: const Icon(Icons.bluetooth),
+                        label: const Text('扫描蓝牙设备'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.accent,
+                          side: BorderSide(color: AppColors.accent),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '提示：点击扫描可自动发现附近的蓝牙智能空调设备',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -763,6 +790,26 @@ class _AddDeviceDialogState extends ConsumerState<_AddDeviceDialog> {
         context,
         MaterialPageRoute(
           builder: (context) => DevicePairingPage(discoveredDevice: result),
+        ),
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+      }
+    }
+  }
+
+  Future<void> _scanBluetoothDevices() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const BluetoothDiscoveryPage()),
+    );
+
+    if (result != null && result is BluetoothDevice) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DevicePairingPage(bluetoothDevice: result),
         ),
       );
 

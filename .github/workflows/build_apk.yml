@@ -38,7 +38,7 @@ jobs:
           flutter pub run build_runner build --delete-conflicting-outputs || echo "Build runner failed, continuing..."
 
       - name: Build APK (Release)
-        run: flutter build apk --release --verbose
+        run: flutter build apk --release
 
       - name: Check if APK exists
         run: |
